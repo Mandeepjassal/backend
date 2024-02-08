@@ -6,7 +6,33 @@ import { Error, Query } from "mongoose";
 import eatToastModel from "./models/EatToastModel.js";
 import productModel from "./models/ProductModel.js";
 import ProductModel from "./models/ProductModel.js";
+import UsersModel from "./models/UsersModel.js";
+import bcrypt from "bcrypt";
 const typeDefs = `
+type User{
+  _id: ID,
+  Firstname: String,
+  Lastname: String,
+  email: String,
+  Address: String,
+  Mobile: Int,
+  Password: String,
+  Usertype: UserType,
+}
+input UserInput{
+  Firstname: String,
+  Lastname: String,
+  email: String,
+  Address: String,
+  Password: String,
+  Mobile: Int,
+  Usertype: UserType,
+}
+enum UserType{
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
 
 type Category{
     _id:ID,
@@ -49,6 +75,8 @@ type Query{
     getAllProducts_db: [Products]
     getCategoryById_db(cat_id:ID) : Category
     getProductById_db(pro_id:ID) : Products
+    getAllUsers_db: [User]
+    checkExistingUser (email: String, Usertype: UserType) : [User]
 }
 
 type Mutation{
@@ -59,6 +87,10 @@ type Mutation{
   insertCategories(categoryInsert: CategoryList): Category
   db_updateCategoryById(cat_id:ID,updated_data :CategoryList): Category
   db_deleteCategoryById(cat_id:ID):Category
+
+  signupUser(userInput: UserInput): User
+  
+  checkExistingUser(email: String!, Password:String!, Usertype: UserType!): User
 }
 
 
@@ -121,6 +153,28 @@ const resolvers = {
         console.log(product_from_db);
 
         return product_from_db;
+      } catch (err) {
+        console.log(err);
+      }
+    },
+    getAllUsers_db: async (parent, args, context, info) => {
+      try {
+        const users_from_db = await UsersModel.find({});
+
+        console.log(parent);
+        console.log(users_from_db);
+
+        return users_from_db;
+      } catch (err) {
+        console.log(err);
+      }
+    },
+
+    checkExistingUser: async (parent, args, context, info) => {
+      try {
+        const { email, Usertype } = args;
+        const existingUser = await UsersModel.find({ email, Usertype });
+        return existingUser;
       } catch (err) {
         console.log(err);
       }
@@ -212,6 +266,61 @@ const resolvers = {
         console.log(`Update Failed due to the error below \n ${err}`);
       }
     },
+    signupUser: async (parent, args, context, info) => {
+      try {
+        if (!args.userInput) {
+          throw new Error("User input data is missing.");
+        }
+        const { email, Usertype } = args.userInput;
+        // Check for existing user with the same email and usertype
+        const existingUser = await UsersModel.findOne({ email, Usertype });
+
+        if (existingUser) {
+          // Throw an error if the user already exists with the same email and usertype
+          throw new Error(
+            "User with the provided email and usertype already exists."
+          );
+        }
+
+        const salt = 15;
+        const hashedPassword = await bcrypt.hash(args.userInput.Password, salt);
+
+        // If no existing user found, proceed with user creation logic
+        const newUser = new UsersModel({
+          ...args.userInput,
+          Password: hashedPassword,
+        });
+
+        const saveduser = await newUser.save();
+
+        return saveduser;
+      } catch (error) {
+        throw error; // Rethrow the error to be caught by Apollo Server and returned to the client
+      }
+    },
+
+    checkExistingUser: async (parent, args, context, info) => {
+      try {
+        const { email, Usertype, Password } = args;
+        const logexistingUser = await UsersModel.findOne({ email, Usertype });
+
+        if (!logexistingUser) {
+          throw new Error("User not found");
+        }
+
+        const isPasswordValid = await bcrypt.compare(
+          Password,
+          logexistingUser.Password
+        );
+
+        if (!isPasswordValid) {
+          throw new Error("Invalid password");
+        }
+        return logexistingUser;
+      } catch (error) {
+        throw error;
+      }
+    },
   },
 };
 
@@ -241,7 +350,7 @@ const server = new ApolloServer({
 //  2. installs your ApolloServer instance as middleware
 //  3. prepares your app to handle incoming requests
 const { url } = await startStandaloneServer(server, {
-  listen: { port: 6001 },
+  listen: { port: 6002 },
 });
 
 console.log(`🚀  Server ready at: ${url}`);
